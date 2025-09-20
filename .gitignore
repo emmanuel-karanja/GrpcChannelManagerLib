@@ -1,0 +1,41 @@
+# ===============================
+# .NET / Visual Studio
+# ===============================
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# ===============================
+# VS Code
+# ===============================
+.vscode/
+*.code-workspace
+
+# ===============================
+# Docker
+# ===============================
+**/bin/
+**/obj/
+docker-compose.override.yml
+**/publish/
+*.log
+
+# ===============================
+# OS / system
+# ===============================
+.DS_Store
+Thumbs.db
+
+# ===============================
+# Rider IDE (if used)
+# ===============================
+.idea/
