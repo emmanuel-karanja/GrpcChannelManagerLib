@@ -1,11 +1,8 @@
 using GrpcChannelManagerLib.Extensions;
-using GrpcChannelManagerLib.Interfaces;
-using GrpcChannelManagerLib.Options;
 using GrpcChannelManagerLib.Providers;
-using StackExchange.Redis;
 using Serilog;
+using StackExchange.Redis;
 
-// Configure Serilog to log to console and file
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
@@ -17,20 +14,22 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(5015); // HTTP
-    options.ListenAnyIP(5016, listenOptions => listenOptions.UseHttps()); // HTTPS (optional)
+    options.ListenAnyIP(5016, listenOptions => listenOptions.UseHttps());
 });
 
-
-// Use Serilog as logging provider
 builder.Host.UseSerilog();
 
-// Configure gRPC Channel Manager with initial endpoints
+// 🔹 Register controllers from this assembly
+builder.Services.AddControllers()
+       .AddApplicationPart(typeof(Program).Assembly);
+
+// 🔹 gRPC Channel Manager
 builder.Services.AddGrpcChannelManager(options =>
 {
     options.Endpoints = new List<string> { "https://localhost:5011", "https://localhost:5012" };
 });
 
-// Detect local Redis (default Docker container: sample-redis)
+// 🔹 Optional Redis
 string redisConnectionString = "localhost:6379";
 string redisChannelName = "GrpcEndpointsChannel";
 
@@ -45,73 +44,25 @@ try
         return new RedisConfigProvider(redisConnectionString, redisChannelName, logger);
     });
 
-    Log.Information("Redis detected at {RedisConnection}, using it for dynamic endpoints.", redisConnectionString);
+    Log.Information("✅ Redis detected at {RedisConnection}", redisConnectionString);
 }
 catch (Exception ex)
 {
-    Log.Warning(ex, "Redis not available at {RedisConnection}. Dynamic updates via Redis disabled.", redisConnectionString);
+    Log.Warning(ex, "⚠ Redis not available at {RedisConnection}", redisConnectionString);
 }
 
 var app = builder.Build();
 
-// Access gRPC Channel Manager
-var channelManager = app.Services.GetRequiredService<IGrpcChannelManager>();
-
-// Use Redis if registered
-var redisProvider = app.Services.GetService<RedisConfigProvider>();
-if (redisProvider != null)
+if (app.Environment.IsDevelopment())
 {
-    try
-    {
-        redisProvider.Subscribe(endpoints =>
-        {
-            try
-            {
-                Log.Information("Updating gRPC endpoints from Redis: {Endpoints}", string.Join(", ", endpoints));
-                channelManager.UpdateEndpoints(endpoints);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Failed to update gRPC endpoints from Redis");
-            }
-        });
-    }
-    catch (Exception ex)
-    {
-        Log.Error(ex, "Failed to subscribe to Redis channel");
-    }
+    app.UseDeveloperExceptionPage();
 }
 
-// Demo HTTP endpoints for testing Redis updates
-app.MapGet("/grpc-test", () =>
-{
-    try
-    {
-        var channel = channelManager.GetAllChannels().FirstOrDefault();
-        return channel != null
-            ? Results.Ok($"Channel ready: {channel.Target}")
-            : Results.NotFound();
-    }
-    catch (Exception ex)
-    {
-        Log.Error(ex, "/grpc-test failed");
-        return Results.Problem("Failed to retrieve gRPC channel.");
-    }
-});
+app.MapControllers();
 
-app.MapPost("/update-endpoints", (List<string> newEndpoints) =>
-{
-    try
-    {
-        channelManager.UpdateEndpoints(newEndpoints);
-        redisProvider?.Publish(newEndpoints); // broadcast updates via Redis if available
-        return Results.Ok("Endpoints updated and broadcasted via Redis.");
-    }
-    catch (Exception ex)
-    {
-        Log.Error(ex, "/update-endpoints failed");
-        return Results.Problem("Failed to update endpoints.");
-    }
-});
+// 🔎 Debug endpoint to list all routes
+app.MapGet("/routes", (IEnumerable<EndpointDataSource> sources) =>
+    string.Join("\n", sources.SelectMany(s => s.Endpoints).Select(e => e.DisplayName))
+);
 
 app.Run();

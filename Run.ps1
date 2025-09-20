@@ -1,24 +1,24 @@
 <#
 .SYNOPSIS
-    Builds SampleGrpcMicroservice as a self-contained EXE, ensures Redis is running, then runs the EXE.
+    Cleans, builds, ensures Redis is running, stops previous instances, and runs SampleGrpcMicroservice.
 .DESCRIPTION
-    Restores dependencies, publishes the sample microservice, starts Redis via docker-compose,
-    waits for Redis to be ready using container health status, and runs the EXE.
+    Restores dependencies, cleans and builds the sample microservice, starts Redis via docker-compose,
+    waits for Redis to be ready using container health status, stops any previously running instances,
+    and runs the microservice via `dotnet run`.
 #>
 
 param (
     [string]$SolutionRoot = ".",
-    [string]$Configuration = "Release",
-    [string]$Runtime = "win-x64",  # Change to linux-x64 if on Linux
+    [string]$Configuration = "Debug",        # Use Release if needed
+    [string]$Runtime = "win-x64",            # Change to linux-x64 if on Linux
     [string]$DockerComposeFile = ".\docker-compose.yml",
     [int]$MaxRedisRetries = 10,
     [int]$RedisRetryDelaySeconds = 3
 )
 
 # Paths
-$sampleProject = Join-Path $SolutionRoot "SampleGrpcMicroservice\SampleGrpcMicroservice.csproj"
-$publishDir = Join-Path $SolutionRoot "SampleGrpcMicroservice\bin\$Configuration\net8.0\$Runtime\publish"
-$exePath = Join-Path $publishDir "SampleGrpcMicroservice.exe"
+$sampleProjectDir = Join-Path $SolutionRoot "SampleGrpcMicroservice"
+$sampleProjectFile = Join-Path $sampleProjectDir "SampleGrpcMicroservice.csproj"
 
 # ----------------------------
 # Step 0: Prerequisites
@@ -40,15 +40,18 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 
 # ----------------------------
-# Step 1: Publish the microservice
+# Step 1: Stop previous instances
 # ----------------------------
-Write-Host "`n=== Publishing SampleGrpcMicroservice as self-contained EXE ==="
-dotnet publish $sampleProject -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=true
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "❌ Failed to publish SampleGrpcMicroservice."
-    exit $LASTEXITCODE
+Write-Host "`n=== Stopping previously running SampleGrpcMicroservice instances ==="
+$existingProcesses = Get-Process -Name "dotnet" -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -match "SampleGrpcMicroservice.dll" }
+if ($existingProcesses) {
+    foreach ($proc in $existingProcesses) {
+        Write-Host "Stopping process Id $($proc.Id)..."
+        Stop-Process -Id $proc.Id -Force
+    }
+    Write-Host "✅ Previous instances stopped."
 } else {
-    Write-Host "✅ Successfully published EXE to: $publishDir"
+    Write-Host "No existing instances found."
 }
 
 # ----------------------------
@@ -100,14 +103,33 @@ if (-not $redisReady) {
 }
 
 # ----------------------------
-# Step 4: Run the microservice EXE
+# Step 4: Clean the project
 # ----------------------------
-Write-Host "`n=== Running SampleGrpcMicroservice.exe ==="
-if (-not (Test-Path $exePath)) {
-    Write-Error "❌ Published EXE not found at $exePath"
-    exit 1
+Write-Host "`n=== Cleaning SampleGrpcMicroservice ==="
+dotnet clean $sampleProjectFile
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "❌ dotnet clean failed."
+    exit $LASTEXITCODE
+} else {
+    Write-Host "✅ Clean successful."
 }
 
-Write-Host "▶ Starting SampleGrpcMicroservice.exe..."
-Start-Process -FilePath $exePath
-Write-Host "✅ SampleGrpcMicroservice.exe process started."
+# ----------------------------
+# Step 5: Build the project
+# ----------------------------
+Write-Host "`n=== Building SampleGrpcMicroservice ==="
+dotnet build $sampleProjectFile -c $Configuration
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "❌ dotnet build failed."
+    exit $LASTEXITCODE
+} else {
+    Write-Host "✅ Build successful."
+}
+
+# ----------------------------
+# Step 6: Run the project
+# ----------------------------
+Write-Host "`n=== Running SampleGrpcMicroservice ==="
+Write-Host "▶ Starting via dotnet run..."
+Start-Process "dotnet" -ArgumentList "run --project `"$sampleProjectFile`" -c $Configuration" -NoNewWindow
+Write-Host "✅ SampleGrpcMicroservice started."
