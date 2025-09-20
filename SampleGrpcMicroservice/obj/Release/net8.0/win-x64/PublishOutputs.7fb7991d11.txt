@@ -1,0 +1,4 @@
+C:\Users\ZBOOK\gRPCConnectionManager\SampleGrpcMicroservice\bin\Release\net8.0\win-x64\publish\appsettings.Development.json
+C:\Users\ZBOOK\gRPCConnectionManager\SampleGrpcMicroservice\bin\Release\net8.0\win-x64\publish\appsettings.json
+C:\Users\ZBOOK\gRPCConnectionManager\SampleGrpcMicroservice\bin\Release\net8.0\win-x64\publish\SampleGrpcMicroservice.pdb
+C:\Users\ZBOOK\gRPCConnectionManager\SampleGrpcMicroservice\bin\Release\net8.0\win-x64\publish\SampleGrpcMicroservice.exe

@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7
+    container_name: sample-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  sample-microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sample-microservice
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    environment:
+      REDIS_CONNECTION: "redis:6379"
+      REDIS_CHANNEL: "GrpcEndpointsChannel"
+    depends_on:
+      redis:
+        condition: service_healthy
