@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("GrpcChannelManagerLib")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4915179803c63c654023ac42afda8f246ccb4fee")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a50a9d0f7c7f80c826fcbc4aa43184bfbbdc1536")]
 [assembly: System.Reflection.AssemblyProductAttribute("GrpcChannelManagerLib")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GrpcChannelManagerLib")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
