@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SampleGrpcMicroservice")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a50a9d0f7c7f80c826fcbc4aa43184bfbbdc1536")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8652c1fbdd0b6eeee80ee594da3fa6604b0f5969")]
 [assembly: System.Reflection.AssemblyProductAttribute("SampleGrpcMicroservice")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SampleGrpcMicroservice")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

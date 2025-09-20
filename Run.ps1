@@ -3,14 +3,16 @@
     Builds SampleGrpcMicroservice as a self-contained EXE, ensures Redis is running, then runs the EXE.
 .DESCRIPTION
     Restores dependencies, publishes the sample microservice, starts Redis via docker-compose,
-    waits for Redis to be ready, and runs the EXE.
+    waits for Redis to be ready using container health status, and runs the EXE.
 #>
 
 param (
     [string]$SolutionRoot = ".",
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",  # Change to linux-x64 if on Linux
-    [string]$DockerComposeFile = ".\docker-compose.yml"
+    [string]$DockerComposeFile = ".\docker-compose.yml",
+    [int]$MaxRedisRetries = 10,
+    [int]$RedisRetryDelaySeconds = 3
 )
 
 # Paths
@@ -67,32 +69,34 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ----------------------------
-# Step 3: Wait for Redis to become ready
+# Step 3: Wait for Redis to become healthy
 # ----------------------------
-Write-Host "`n=== Waiting for Redis to be ready ==="
-$maxRetries = 10
+Write-Host "`n=== Waiting for Redis container to be healthy ==="
 $retry = 0
 $redisReady = $false
+$redisContainerName = "sample-redis"
 
-while ($retry -lt $maxRetries -and -not $redisReady) {
+while ($retry -lt $MaxRedisRetries -and -not $redisReady) {
     try {
-        $connection = [StackExchange.Redis.ConnectionMultiplexer]::Connect("localhost:6379")
-        if ($connection.IsConnected) {
+        $status = docker inspect --format='{{.State.Health.Status}}' $redisContainerName 2>$null
+        if ($status -eq "healthy") {
             $redisReady = $true
-            $connection.Close()
+        } else {
+            Write-Host "⏳ Redis not ready yet (attempt $($retry+1)/$MaxRedisRetries). Status: $status. Waiting $RedisRetryDelaySeconds seconds..."
+            Start-Sleep -Seconds $RedisRetryDelaySeconds
+            $retry++
         }
-    } catch {}
-    if (-not $redisReady) {
-        Write-Host "⏳ Redis not ready yet (attempt $($retry + 1)/$maxRetries). Waiting 3 seconds..."
-        Start-Sleep -Seconds 3
+    } catch {
+        Write-Host "⏳ Redis container not found yet. Waiting $RedisRetryDelaySeconds seconds..."
+        Start-Sleep -Seconds $RedisRetryDelaySeconds
         $retry++
     }
 }
 
 if (-not $redisReady) {
-    Write-Warning "⚠ Redis did not become ready after $maxRetries retries. Proceeding anyway..."
+    Write-Warning "⚠ Redis did not become healthy after $MaxRedisRetries retries. Proceeding anyway..."
 } else {
-    Write-Host "✅ Redis is ready!"
+    Write-Host "✅ Redis is healthy and ready!"
 }
 
 # ----------------------------

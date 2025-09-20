@@ -1,6 +1,0 @@
-@SampleGrpcMicroservice_HostAddress = http://localhost:5148
-
-GET {{SampleGrpcMicroservice_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

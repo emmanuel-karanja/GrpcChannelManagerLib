@@ -2,26 +2,32 @@ using GrpcChannelManagerLib.Extensions;
 using GrpcChannelManagerLib.Interfaces;
 using GrpcChannelManagerLib.Options;
 using GrpcChannelManagerLib.Providers;
-using Azure.Identity;
+using StackExchange.Redis;
+using Serilog;
+
+// Configure Serilog to log to console and file
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.Console()
+    .WriteTo.File("logs/GrpcApp.log", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Logging
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(5015); // HTTP
+    options.ListenAnyIP(5016, listenOptions => listenOptions.UseHttps()); // HTTPS (optional)
+});
+
+
+// Use Serilog as logging provider
+builder.Host.UseSerilog();
 
 // Configure gRPC Channel Manager with initial endpoints
 builder.Services.AddGrpcChannelManager(options =>
 {
-    options.Endpoints = new List<string> { "https://localhost:5001", "https://localhost:5002" };
-});
-
-// Register KeyVault provider using Azure DefaultAzureCredential
-builder.Services.AddSingleton<KeyVaultConfigProvider>(sp =>
-{
-    var logger = sp.GetRequiredService<ILogger<KeyVaultConfigProvider>>();
-    var vaultUri = "https://<your-vault-name>.vault.azure.net/";
-    return new KeyVaultConfigProvider(vaultUri, logger);
+    options.Endpoints = new List<string> { "https://localhost:5011", "https://localhost:5012" };
 });
 
 // Detect local Redis (default Docker container: sample-redis)
@@ -30,16 +36,20 @@ string redisChannelName = "GrpcEndpointsChannel";
 
 try
 {
-    var testConnection = StackExchange.Redis.ConnectionMultiplexer.Connect(redisConnectionString);
+    using var testConnection = ConnectionMultiplexer.Connect(redisConnectionString);
     testConnection.Close();
+
     builder.Services.AddSingleton<RedisConfigProvider>(sp =>
-        new RedisConfigProvider(redisConnectionString, redisChannelName, sp.GetRequiredService<ILogger<RedisConfigProvider>>())
-    );
-    Console.WriteLine($"[Info] Redis detected at {redisConnectionString}, using it for dynamic endpoints.");
+    {
+        var logger = sp.GetRequiredService<ILogger<RedisConfigProvider>>();
+        return new RedisConfigProvider(redisConnectionString, redisChannelName, logger);
+    });
+
+    Log.Information("Redis detected at {RedisConnection}, using it for dynamic endpoints.", redisConnectionString);
 }
-catch
+catch (Exception ex)
 {
-    Console.WriteLine("[Warning] Redis not available at localhost:6379. Dynamic updates via Redis disabled.");
+    Log.Warning(ex, "Redis not available at {RedisConnection}. Dynamic updates via Redis disabled.", redisConnectionString);
 }
 
 var app = builder.Build();
@@ -47,47 +57,61 @@ var app = builder.Build();
 // Access gRPC Channel Manager
 var channelManager = app.Services.GetRequiredService<IGrpcChannelManager>();
 
-// Try to use Redis if registered
+// Use Redis if registered
 var redisProvider = app.Services.GetService<RedisConfigProvider>();
 if (redisProvider != null)
 {
-    redisProvider.Subscribe(endpoints =>
+    try
     {
-        Console.WriteLine($"[Redis] Updating gRPC endpoints: {string.Join(", ", endpoints)}");
-        channelManager.UpdateEndpoints(endpoints);
-    });
+        redisProvider.Subscribe(endpoints =>
+        {
+            try
+            {
+                Log.Information("Updating gRPC endpoints from Redis: {Endpoints}", string.Join(", ", endpoints));
+                channelManager.UpdateEndpoints(endpoints);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to update gRPC endpoints from Redis");
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Failed to subscribe to Redis channel");
+    }
 }
 
-// Periodically fetch endpoints from Azure KeyVault
-var keyVaultProvider = app.Services.GetRequiredService<KeyVaultConfigProvider>();
-_ = Task.Run(async () =>
-{
-    while (true)
-    {
-        var endpoints = await keyVaultProvider.GetEndpointsAsync("GrpcEndpointsSecret");
-        if (endpoints.Any())
-        {
-            Console.WriteLine($"[KeyVault] Updating gRPC endpoints: {string.Join(", ", endpoints)}");
-            channelManager.UpdateEndpoints(endpoints);
-        }
-        await Task.Delay(TimeSpan.FromSeconds(60));
-    }
-});
-
-// Demo HTTP endpoints
+// Demo HTTP endpoints for testing Redis updates
 app.MapGet("/grpc-test", () =>
 {
-    var channel = channelManager.GetAllChannels().FirstOrDefault();
-    return channel != null
-        ? Results.Ok($"Channel ready: {channel.Target}")
-        : Results.NotFound();
+    try
+    {
+        var channel = channelManager.GetAllChannels().FirstOrDefault();
+        return channel != null
+            ? Results.Ok($"Channel ready: {channel.Target}")
+            : Results.NotFound();
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "/grpc-test failed");
+        return Results.Problem("Failed to retrieve gRPC channel.");
+    }
 });
 
 app.MapPost("/update-endpoints", (List<string> newEndpoints) =>
 {
-    channelManager.UpdateEndpoints(newEndpoints);
-    redisProvider?.Publish(newEndpoints); // broadcast updates via Redis if available
-    return Results.Ok("Endpoints updated and broadcasted via Redis.");
+    try
+    {
+        channelManager.UpdateEndpoints(newEndpoints);
+        redisProvider?.Publish(newEndpoints); // broadcast updates via Redis if available
+        return Results.Ok("Endpoints updated and broadcasted via Redis.");
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "/update-endpoints failed");
+        return Results.Problem("Failed to update endpoints.");
+    }
 });
 
 app.Run();

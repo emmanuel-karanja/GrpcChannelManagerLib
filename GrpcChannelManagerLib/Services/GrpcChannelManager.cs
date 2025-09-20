@@ -15,43 +15,88 @@ public class GrpcChannelManager : IGrpcChannelManager
 
     public GrpcChannelManager(IOptionsMonitor<GrpcServerOptions> optionsMonitor, ILogger<GrpcChannelManager> logger)
     {
-        _logger = logger;
-        _options = optionsMonitor.CurrentValue;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = optionsMonitor.CurrentValue ?? throw new ArgumentNullException(nameof(optionsMonitor.CurrentValue));
 
+        // Validate and create channels for all initial endpoints
         foreach (var endpoint in _options.Endpoints)
+        {
             GetOrCreateChannel(endpoint);
+        }
 
-        optionsMonitor.OnChange(updatedOptions => UpdateEndpoints(updatedOptions.Endpoints));
+        // Subscribe to changes
+        optionsMonitor.OnChange(updatedOptions =>
+        {
+            UpdateEndpoints(updatedOptions.Endpoints);
+        });
     }
 
     public GrpcChannel GetOrCreateChannel(string address)
     {
-        return _channels.GetOrAdd(address, addr =>
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri))
+            throw new ArgumentException($"Invalid gRPC endpoint URI: '{address}'", nameof(address));
+
+        // Use absolute URI (without trailing slash) as the key
+        var normalized = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+
+        return _channels.GetOrAdd(normalized, _ =>
         {
-            _logger.LogInformation("Creating gRPC channel for {Address}", addr);
-            return GrpcChannel.ForAddress(addr);
+            _logger.LogInformation("Creating gRPC channel for {Address}", normalized);
+            return GrpcChannel.ForAddress(normalized);
         });
     }
 
     public void RemoveChannel(string address)
     {
-        if (_channels.TryRemove(address, out var channel))
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri))
+            throw new ArgumentException($"Invalid gRPC endpoint URI: '{address}'", nameof(address));
+
+        var normalized = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+
+        if (_channels.TryRemove(normalized, out var channel))
         {
-            _logger.LogInformation("Disposing gRPC channel for {Address}", address);
+            _logger.LogInformation("Disposing gRPC channel for {Address}", normalized);
             channel.Dispose();
         }
     }
+
 
     public IEnumerable<GrpcChannel> GetAllChannels() => _channels.Values;
 
     public void UpdateEndpoints(IEnumerable<string> newEndpoints)
     {
-        var newSet = new HashSet<string>(newEndpoints);
+        if (newEndpoints == null) return;
 
+        var normalizedNew = new HashSet<string>(newEndpoints.Select(NormalizeAddress));
+
+        // Remove channels that are no longer needed
         foreach (var key in _channels.Keys)
-            if (!newSet.Contains(key)) RemoveChannel(key);
+        {
+            if (!normalizedNew.Contains(key)) RemoveChannel(key);
+        }
 
-        foreach (var endpoint in newSet)
+        // Add new channels
+        foreach (var endpoint in normalizedNew)
+        {
             GetOrCreateChannel(endpoint);
+        }
+    }
+
+    /// <summary>
+    /// Ensures the endpoint is trimmed and has a valid scheme.
+    /// </summary>
+    private static string NormalizeAddress(string address)
+    {
+        address = address.Trim();
+
+        if (!address.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !address.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Invalid gRPC endpoint URI: '{address}'");
+        }
+
+        // Validate the URI
+        var uri = new Uri(address); // Will throw if invalid
+        return uri.AbsoluteUri;     // Always normalized
     }
 }
